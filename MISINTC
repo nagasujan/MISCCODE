@@ -1,0 +1,332 @@
+Update Type:
+var CiscoISE_device_updation = Class.create();
+CiscoISE_device_updation.prototype = {
+	initialize: function() {
+	},
+	updateDevice : function()
+	{
+		var id = current.variables.device_id;
+		//gs.log("UUID" +id, "D REST");
+		
+		//get IP address seperated by 32
+		var ip_address = current.variables.edit_ip_address.getDisplayValue();
+		var ip_string = ip_address.split("/");
+		var ip = ip_string[0]; //72.203.227.127
+		var mask = '';
+		if(ip_string[1] && ip_string[1] != ''){
+		 mask = ip_string[1];//32*/
+		}
+		
+		//update radiusSharedsecret only when radius is true
+		var radiusauth = current.variables.radius;
+		var radiusSharedsecret = current.variables.radius_shared_secret;
+		if(radiusauth == 'false')
+		{
+			radiusSharedsecret = '';
+		}
+		else if(radiusauth == 'true' && (!radiusSharedsecret || radiusSharedsecret == '')){
+			radiusSharedsecret = '';
+		}
+	//	gs.log("Raduis: "+ radiusauth + "Radius sharedsecret: "+ radiusSharedsecret, "D message");
+		
+	//update tacacsSharedSecret only when tacacs is true
+		var tacac = current.variables.tacacs;
+		var tacacsSharedSecret = current.variables.tacacs_shared_secret;
+		if(tacac == 'false')
+		{
+			tacacsSharedSecret = '';
+		}
+		else if(tacac == 'true' && (!tacacsSharedSecret || tacacsSharedSecret == '')){
+			tacacsSharedSecret = '';
+		}
+	//	gs.log("Tacacs: "+ tacac + "Tacacs sharedsecret: "+ tacacsSharedSecret, "D message");
+		
+		var desc = current.variables.description; //desc
+		var deviceloc = current.variables.device_location.getDisplayValue(); //location details
+		var devicetyp = current.variables.device_type.getDisplayValue(); // device type
+		
+		var legacy_tacacs_single_connect = current.variables.legacy_tacacs_single_connect;
+		// var tacacs_single_connect = current.variables.legacy_tacacs_single_connect;
+		var connectModeOption;
+		if(legacy_tacacs_single_connect == 'false' || legacy_tacacs_single_connect == false)
+			{
+			connectModeOption = 'OFF';
+		}
+		else {
+			connectModeOption = current.variables.tacacs_single_connect_mode;
+		}
+		gs.log("Legacy: "+ legacy_tacacs_single_connect + "Single Connect Mode: "+ connectModeOption, "D Rest");
+		//gs.log("Mode: " +connectModeOption);
+		
+		var jsonString = '{'+
+			'"NetworkDevice" : {'+
+				'"authenticationSettings":{'+
+					
+					'"radiusSharedSecret":"'+radiusSharedsecret+'" '+ //radiusSharedSecret
+					//	'"enableKeyWrap" : true,'+
+					//	'"keyEncryptionKey" : "1234567890123456",'+
+					//	'"messageAuthenticatorCodeKey" : "12345678901234567890",'+
+					//	'"keyInputFormat" : "ASCII"'+
+					'},'+
+					'"description":"'+desc+'",'+
+					'"name":"'+current.variables.edit_device_name+'",'+
+					'"profileName":"Cisco",'+
+					'"tacacsSettings" : {'+
+						'"sharedSecret" : "'+tacacsSharedSecret+'",'+
+						'"connectModeOptions" : "'+connectModeOption+'" '+
+						'},'+
+						'"NetworkDeviceIPList" : [ {'+
+							'"ipaddress" : "'+current.variables.modify_ip_address+'",'+
+							'"mask" : 32'+
+							'} ],'+
+							'"NetworkDeviceGroupList" : [ "'+deviceloc+'", "'+devicetyp+'", "'+current.variables.layer+'", "IPSEC#Is IPSEC Device" ]'+
+							'}'+
+							'}';
+							gs.log("Update Device data : " + jsonString, "D REST");
+							if(!gs.nil(jsonString))
+								{
+								//Cisco-ISE Stage, Put
+								var my_ecc_agent = "MyRESTAgentCorrelator_"+current.sys_id;
+								var r1 = new sn_ws.RESTMessageV2('Cisco-ISE Stage', 'PUT');
+								r1.setEccCorrelator(my_ecc_agent);
+								r1.setRequestBody(jsonString);
+								var authenticationType ='basic';
+								r1.setAuthentication(authenticationType, 'ISE - Stage');//Cisco-ISE
+								var endPoint = this.getEndPoint()+id;
+								gs.log("Put Endpoint" + endPoint, "D REST");
+								//r1.setRestEndPoint(endPoint);
+								r1.setEndpoint(endPoint);
+								var response1=r1.execute();
+								var result_code = response1.getStatusCode();
+								//gs.log("RESPONSE CODE = "+response1.getStatusCode());
+								
+								if(result_code == '200') {
+									//gs.log("Success notification ", "D Rest");
+									gs.eventQueue('cisco-ise.restapi.success', current);
+									
+									//update record into network-device table
+									
+									var networkdevice = new GlideRecord('x_hclx2_cisco_ise_network_devices');
+									networkdevice.addQuery('u_id', id);
+									networkdevice.query();
+									
+									//while(networkdevice.next())
+									while(networkdevice.next())										
+										{
+										
+									//	gs.log("Inside while "+ desc, "D REST");
+									//	gs.log("Inside while "+ current.variables.edit_device_name +" "+ current.variables.device_location, "D REST");
+										networkdevice.u_name = current.variables.edit_device_name;
+										networkdevice.u_ip_address = current.variables.modify_ip_address;
+										networkdevice.u_device_type = current.variables.device_type;
+										networkdevice.u_location = current.variables.device_location;
+										networkdevice.u_description = desc;
+										networkdevice.u_layer = current.variables.layer;
+										networkdevice.u_radius = current.variables.radius;
+										networkdevice.u_radius_shared_secret = radiusSharedsecret;//radiusSharedsecret
+										networkdevice.u_tacacs = current.variables.tacacs;
+										networkdevice.u_tacacs_shared_secret = tacacsSharedSecret;
+										networkdevice.u_legacy_tacacs_single_connect_support = legacy_tacacs_single_connect;
+										networkdevice.select_the_single_connect_mode = connectModeOption;
+										networkdevice.u_network_device_groups = deviceloc+"|"+devicetyp+"|"+current.variables.layer+"|IPSEC#Is IPSEC Device";
+										networkdevice.update();
+									}
+								}
+								else {
+									gs.eventQueue('cisco-ise.restapi.fail', current);
+								}
+								
+							}
+						},
+						
+						getEndPoint : function()
+						{
+							
+							if(gs.getProperty('glide.servlet.uri') == 'https://sujdev.service-now.com')
+								return gs.getProperty('cisco-ise.updation') ;
+							else
+								return gs.getProperty('cisco-ise.updation') ;
+						},
+						type: 'CiscoISE_device_updation'
+					};
+
+Add new device type:
+var CiscoISE_device_creation = Class.create();
+CiscoISE_device_creation.prototype = {
+	initialize: function() {
+	},
+	
+	createDevice : function()
+	{
+		var ip_address = current.variables.device_ip_address.getDisplayValue();
+		var ip_string = ip_address.split("/");
+		var ip = ip_string[0]; //72.203.227.127
+		var mask = '';
+		if(ip_string[1] && ip_string[1] != ''){
+		 mask = ip_string[1];//32*/
+		}
+		
+	//update radiusSharedsecret only when radius is true
+		var radiusauth = current.variables.radius;
+		var radiusSharedsecret = current.variables.radius_shared_secret;
+		if(radiusauth == 'false')
+		{
+			radiusSharedsecret = '';
+		}
+		else if(radiusauth == 'true' && (!radiusSharedsecret || radiusSharedsecret == '')){
+			radiusSharedsecret = '';
+		}
+	//	gs.log("Raduis: "+ radiusauth + "Radius sharedsecret: "+ radiusSharedsecret, "D message");
+		
+	//update tacacsSharedSecret only when tacacs is true
+		var tacac = current.variables.tacacs;
+		var tacacsSharedSecret = current.variables.tacacs_shared_secret;
+		if(tacac == 'false')
+		{
+			tacacsSharedSecret = '';
+		}
+		else if(tacac == 'true' && (!tacacsSharedSecret || tacacsSharedSecret == '')){
+			tacacsSharedSecret = '';
+		}
+	//	gs.log("Tacacs: "+ tacac + "Tacacs sharedsecret: "+ tacacsSharedSecret, "D message");
+		
+		var desc = current.variables.description; //desc
+		var deviceloc = current.variables.device_location.getDisplayValue(); //location details
+		var devicetyp = current.variables.device_type.getDisplayValue(); // device type
+		
+		
+		var legacy_tacacs_single_connect = current.variables.legacy_tacacs_single_connect;
+		// var tacacs_single_connect = current.variables.legacy_tacacs_single_connect;
+		var connectModeOption;
+		if(legacy_tacacs_single_connect == 'false' || legacy_tacacs_single_connect == false)
+			{
+			connectModeOption = 'OFF';
+		}
+		else {
+			connectModeOption = current.variables.tacacs_single_connect_mode;
+		}
+		gs.log("Legacy: "+ legacy_tacacs_single_connect + "Single Connect Mode: "+ connectModeOption, "D REST");
+		//gs.log("DN_Layer: " +current.variables.layer);
+		//gs.log("Mode: " +connectModeOption);
+		
+		var jsonString = '{'+
+			'"NetworkDevice" : {'+
+				'"authenticationSettings":{'+
+					'"radiusSharedSecret":"'+radiusSharedsecret+'" '+ //radiusSharedSecret
+					//	'"enableKeyWrap" : true,'+
+					//	'"keyEncryptionKey" : "1234567890123456",'+
+					//	'"messageAuthenticatorCodeKey" : "12345678901234567890",'+
+					//	'"keyInputFormat" : "ASCII"'+
+					'},'+
+					'"description":"'+desc+'",'+
+					'"name":"'+current.variables.add_device_name+'",'+
+					'"profileName":"Cisco",'+
+					'"tacacsSettings" : {'+
+						'"sharedSecret" : "'+tacacsSharedSecret+'",'+
+						'"connectModeOptions" : "'+connectModeOption+'" '+
+						'},'+
+						'"NetworkDeviceIPList" : [ {'+
+							'"ipaddress" : "'+current.variables.device_ip_address+'",'+
+							'"mask" : 32'+
+							'} ],'+
+							'"NetworkDeviceGroupList" : [ "'+deviceloc+'", "'+devicetyp+'", "'+current.variables.layer+'", "IPSEC#Is IPSEC Device" ]'+
+							'}'+
+							'}';
+							gs.log("Add Device data : " + jsonString, "D REST");
+							if(!gs.nil(jsonString))
+								{
+								//Cisco-ISE Stage, POST
+								var my_ecc_agent = "MyRESTAgentCorrelator_"+current.sys_id;
+								var r = new sn_ws.RESTMessageV2('Cisco-ISE Stage', 'POST');
+								r.setEccCorrelator(my_ecc_agent);
+								//r.setXMLParameter('data',jsonString);
+								r.setRequestBody(jsonString);
+								var authenticationType ='basic';
+								r.setAuthentication(authenticationType, 'ISE - Stage');
+								var endPoint = this.getEndPoint();
+								//r.setRestEndPoint(endPoint);
+								var response1=r.execute();
+								var result_code = response1.getStatusCode();
+								gs.log("RESPONSE CODE = "+result_code, "D REST Message");
+								
+								if(result_code == '201') {
+									gs.eventQueue('cisco-ise.restapi.success', current);
+									var eccqueue = this.getECC();
+									
+									
+									
+									//insert record into network device table
+									
+									var networkdevice = new GlideRecord('x_hclx2_cisco_ise_network_devices');
+									networkdevice.initialize();
+									networkdevice.u_name = current.variables.add_device_name;
+									networkdevice.u_ip_address = ip;
+									networkdevice.u_device_type = current.variables.device_type;
+									networkdevice.u_location = current.variables.device_location;
+									networkdevice.u_description = desc;
+									networkdevice.u_layer = current.variables.layer;
+									networkdevice.u_radius = current.variables.radius; 
+									networkdevice.u_radius_shared_secret = radiusSharedsecret; 
+									networkdevice.u_tacacs = current.variables.tacacs;
+									networkdevice.u_tacacs_shared_secret = tacacsSharedSecret; 
+									networkdevice.u_legacy_tacacs_single_connect_support = legacy_tacacs_single_connect;
+									networkdevice.select_the_single_connect_mode = connectModeOption;
+									
+									networkdevice.u_id = eccqueue[0].Device;						
+									networkdevice.u_network_device_groups = deviceloc+"|"+devicetyp+"|"+current.variables.layer+"|IPSEC#Is IPSEC Device";								
+									networkdevice.insert();
+								}
+								else {
+									gs.eventQueue('cisco-ise.restapi.fail', current);
+								}
+							}
+						},
+						
+						getEndPoint : function()
+						{
+							
+							if(gs.getProperty('glide.servlet.uri') == 'https://sujdev.service-now.com')
+								return gs.getProperty('cisco-ise.creation') ;
+							else
+								return gs.getProperty('cisco-ise.creation') ;
+						},
+						getECC : function()
+						{
+							var myValues = [];
+							var test = {};
+							var lvECC = new GlideRecord('ecc_queue');
+							lvECC.addNotNullQuery('agent_correlator');
+							lvECC.addQuery('agent_correlator', 'MyRESTAgentCorrelator_'+current.sys_id);
+							lvECC.addQuery('queue','input');
+							lvECC.query();
+							if(lvECC.next())
+								{
+								var xmlDoc = new XMLDocument2();
+								xmlDoc.parseXML(lvECC.payload.toString());
+								var a =  xmlDoc.getNode("/results/httpHeaders");
+								var ac = a.getChildNodeIterator();
+								gs.print(ac);
+								while(ac.hasNext())
+									{
+									var ab = ac.next();
+									if(ab.getAttribute("name") == "Location"){
+										workflow.scratchpad.locationValue = ab.getAttribute("value");
+									//	current.work_notes = "Location ID - "+ ab.getAttribute("value");
+										var device_uuid = ab.getAttribute("value");
+										var splitValues = device_uuid.split("/");
+										var device_id = splitValues[6]; //this prints id
+										gs.log("Current_ID = "+device_id, "D REST Message");
+										test["Location"] = device_uuid;
+										test["Device"] =  device_id;
+										myValues.push(test);
+										test = [];
+									}
+								}
+							}
+							return myValues;
+						},
+	
+						type: 'CiscoISE_device_creation'
+					};
+					
+					
